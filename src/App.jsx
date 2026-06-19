@@ -162,6 +162,8 @@ export default function App() {
   const [securityWarnings, setSecurityWarnings] = useState(0);
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
   const [storageError, setStorageError] = useState("");
+  const [toast, setToast] = useState("");
+  const [isSubmitConfirmOpen, setIsSubmitConfirmOpen] = useState(false);
   const [settings, setSettings] = useState(() =>
     readStorage(SETTINGS_KEY, { durationMinutes: quizSettings.durationMinutes })
   );
@@ -336,6 +338,9 @@ export default function App() {
     const nextAttempts = { ...attempts, [attemptKey]: result };
     setAttempts(nextAttempts);
     setSubmitted(result);
+    setIsSubmitConfirmOpen(false);
+    setToast(autoSubmitted ? "Quiz auto-submitted." : "Quiz submitted successfully.");
+    window.setTimeout(() => setToast(""), 3200);
     try {
       await saveAttempt(result, ATTEMPTS_KEY, attempts);
       setStorageError("");
@@ -404,7 +409,7 @@ export default function App() {
             setSubmitted(null);
             setCurrentQuestion(0);
           }}
-          onSubmit={() => submitQuiz(false)}
+          onSubmit={() => setIsSubmitConfirmOpen(true)}
           previousAttempt={previousAttempt}
           questions={questions}
           secondsLeft={secondsLeft}
@@ -445,6 +450,15 @@ export default function App() {
         <div className="fixed bottom-4 left-4 right-4 z-50 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 shadow-soft sm:left-auto sm:max-w-md">
           {storageError}
         </div>
+      )}
+
+      {toast && <Toast message={toast} />}
+
+      {isSubmitConfirmOpen && (
+        <ConfirmSubmitModal
+          onCancel={() => setIsSubmitConfirmOpen(false)}
+          onConfirm={() => submitQuiz(false)}
+        />
       )}
     </main>
   );
@@ -488,6 +502,47 @@ function TopBar({ hideControls, mode, onModeChange }) {
         )}
       </div>
     </section>
+  );
+}
+
+function ConfirmSubmitModal({ onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 backdrop-blur-sm">
+      <div className="animate-pop w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+            <CheckCircle2 size={23} />
+          </div>
+          <div>
+            <h2 className="text-xl font-black text-slate-950">Submit quiz?</h2>
+            <p className="text-sm text-slate-600">You cannot change your answers after submitting.</p>
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            onClick={onCancel}
+            className="h-11 rounded-lg border border-slate-300 bg-white font-bold text-slate-700 hover:bg-slate-50"
+          >
+            No, go back
+          </button>
+          <button
+            onClick={onConfirm}
+            className="h-11 rounded-lg bg-emerald-600 font-bold text-white hover:bg-emerald-700"
+          >
+            Yes, submit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Toast({ message }) {
+  return (
+    <div className="animate-toast fixed right-4 top-4 z-[60] flex max-w-sm items-center gap-3 rounded-lg border border-emerald-200 bg-white px-4 py-3 font-bold text-emerald-700 shadow-soft">
+      <CheckCircle2 size={20} />
+      <span>{message}</span>
+    </div>
   );
 }
 
@@ -626,7 +681,7 @@ function LoginCard({
           </button>
         </form>
       ) : (
-        <div className="space-y-4">
+        <div className="animate-card-in space-y-4">
           <div className="flex flex-col gap-3 rounded-lg bg-slate-50 p-3 sm:flex-row sm:items-center">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
               <UserRound size={20} />
@@ -985,7 +1040,7 @@ function AdminNav({ active, onChange }) {
 
 function TeacherSessionCard({ onLogout, teacherName }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-soft sm:p-5">
+    <div className="animate-card-in rounded-lg border border-slate-200 bg-white p-3 shadow-soft sm:p-5">
       <div className="flex items-center gap-3 rounded-lg bg-indigo-50 p-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white">
           <UserRound size={20} />
