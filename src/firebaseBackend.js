@@ -1,6 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { collection, deleteDoc, doc, getDocs, getFirestore, setDoc, writeBatch } from "firebase/firestore";
-import { subjects as seedSubjects } from "./quizData";
+import { collection, deleteDoc, doc, getDoc, getDocs, getFirestore, setDoc, writeBatch } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -40,25 +39,33 @@ async function readAttempts() {
   return Object.fromEntries(snapshot.docs.map((entry) => [entry.id, entry.data()]));
 }
 
-export async function loadQuizData(keys) {
+async function readSettings(fallback) {
+  const snapshot = await getDoc(doc(db, "settings", "quiz"));
+  return snapshot.exists() ? snapshot.data() : fallback;
+}
+
+export async function loadQuizData(keys, fallbackSettings) {
   if (!firebaseEnabled) {
     return {
       students: readStorage(keys.students, []),
-      subjects: readStorage(keys.subjects, seedSubjects),
-      attempts: readStorage(keys.attempts, {})
+      subjects: readStorage(keys.subjects, []),
+      attempts: readStorage(keys.attempts, {}),
+      settings: readStorage(keys.settings, fallbackSettings)
     };
   }
 
-  const [students, subjects, attempts] = await Promise.all([
+  const [students, subjects, attempts, settings] = await Promise.all([
     readCollection("students"),
     readCollection("subjects"),
-    readAttempts()
+    readAttempts(),
+    readSettings(fallbackSettings)
   ]);
 
   return {
     students,
-    subjects: subjects.length ? subjects : seedSubjects,
-    attempts
+    subjects,
+    attempts,
+    settings
   };
 }
 
@@ -94,6 +101,15 @@ export async function saveSubjects(subjects, key) {
     batch.set(doc(db, "subjects", subject.id), subject);
   });
   await batch.commit();
+}
+
+export async function saveSettings(settings, key) {
+  if (!firebaseEnabled) {
+    writeStorage(key, settings);
+    return;
+  }
+
+  await setDoc(doc(db, "settings", "quiz"), settings);
 }
 
 export async function saveAttempt(attempt, key, currentAttempts) {

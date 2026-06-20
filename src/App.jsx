@@ -18,11 +18,12 @@ import {
   UserPlus,
   UserRound
 } from "lucide-react";
-import { quizSettings, subjects as seedSubjects } from "./quizData";
+import { quizSettings } from "./quizData";
 import {
   clearStoredAttempts,
   loadQuizData,
   saveAttempt,
+  saveSettings,
   saveStudents,
   saveSubjects
 } from "./firebaseBackend";
@@ -130,14 +131,18 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
-function generateSerial(existingStudents, index) {
+function generateSerial(existingStudents) {
   const existing = new Set(existingStudents.map((student) => normalize(student.serial)));
   let serial = "";
-  let counter = existingStudents.length + index + 1;
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
   do {
-    serial = `QZ-${String(counter).padStart(4, "0")}`;
-    counter += 1;
+    const randomPart = Array.from({ length: 8 }, () => {
+      const values = new Uint32Array(1);
+      crypto.getRandomValues(values);
+      return alphabet[values[0] % alphabet.length];
+    }).join("");
+    serial = `QZ-${randomPart.slice(0, 4)}-${randomPart.slice(4)}`;
   } while (existing.has(normalize(serial)));
 
   return serial;
@@ -146,7 +151,7 @@ function generateSerial(existingStudents, index) {
 export default function App() {
   const [mode, setMode] = useState("student");
   const [students, setStudents] = useState(() => readStorage(STUDENTS_KEY, []));
-  const [subjects, setSubjects] = useState(() => readStorage(SUBJECTS_KEY, seedSubjects));
+  const [subjects, setSubjects] = useState(() => readStorage(SUBJECTS_KEY, []));
   const [attempts, setAttempts] = useState(() => readStorage(ATTEMPTS_KEY, {}));
   const [loginName, setLoginName] = useState("");
   const [loginSerial, setLoginSerial] = useState("");
@@ -181,12 +186,16 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
-    loadQuizData({ students: STUDENTS_KEY, subjects: SUBJECTS_KEY, attempts: ATTEMPTS_KEY })
+    loadQuizData(
+      { students: STUDENTS_KEY, subjects: SUBJECTS_KEY, attempts: ATTEMPTS_KEY, settings: SETTINGS_KEY },
+      { durationMinutes: quizSettings.durationMinutes }
+    )
       .then((data) => {
         if (!isMounted) return;
         setStudents(data.students);
         setSubjects(data.subjects);
         setAttempts(data.attempts);
+        setSettings(data.settings);
         setSelectedSubjectId(data.subjects[0]?.id);
       })
       .catch((error) => {
@@ -272,6 +281,7 @@ export default function App() {
 
     setStudent(matchedStudent);
     setLoginError("");
+    showToast(`Welcome, ${matchedStudent.name}.`);
   }
 
   async function updateStudents(nextStudents) {
@@ -339,8 +349,7 @@ export default function App() {
     setAttempts(nextAttempts);
     setSubmitted(result);
     setIsSubmitConfirmOpen(false);
-    setToast(autoSubmitted ? "Quiz auto-submitted." : "Quiz submitted successfully.");
-    window.setTimeout(() => setToast(""), 3200);
+    showToast(autoSubmitted ? "Quiz auto-submitted." : "Quiz submitted successfully.");
     try {
       await saveAttempt(result, ATTEMPTS_KEY, attempts);
       setStorageError("");
@@ -351,6 +360,7 @@ export default function App() {
   }
 
   function resetSession() {
+    if (student) showToast("Student logged out.");
     setStudent(null);
     setQuestions([]);
     setAnswers({});
@@ -377,6 +387,24 @@ export default function App() {
     } catch (error) {
       console.error(error);
       setStorageError("Could not clear Firebase attempts. Check Firestore rules.");
+    }
+  }
+
+  function showToast(message) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 3200);
+  }
+
+  async function updateSettings(nextSettings) {
+    setSettings(nextSettings);
+    writeStorage(SETTINGS_KEY, nextSettings);
+    try {
+      await saveSettings(nextSettings, SETTINGS_KEY);
+      setStorageError("");
+      showToast("Quiz time saved.");
+    } catch (error) {
+      console.error(error);
+      setStorageError("Could not save settings to Firebase. Check Firestore rules.");
     }
   }
 
@@ -428,13 +456,11 @@ export default function App() {
           attempts={attempts}
           onAttemptsClear={clearAttempts}
           onLoginStateChange={setIsAdminLoggedIn}
-          onSettingsChange={(nextSettings) => {
-            setSettings(nextSettings);
-            writeStorage(SETTINGS_KEY, nextSettings);
-          }}
+          onSettingsChange={updateSettings}
           onStudentsChange={updateStudents}
           onSubjectsChange={updateSubjects}
           settings={settings}
+          showToast={showToast}
           students={students}
           subjects={subjects}
         />
@@ -905,6 +931,7 @@ function AdminPortal({
   onStudentsChange,
   onSubjectsChange,
   settings,
+  showToast,
   students,
   subjects
 }) {
@@ -940,6 +967,7 @@ function AdminPortal({
                 setTeacherName(name);
                 writeStorage(ADMIN_SESSION_KEY, { name });
                 setIsUnlocked(true);
+                showToast(`Welcome, ${name}.`);
                 setAdminError("");
               } else {
                 setAdminError("Incorrect admin code.");
@@ -981,6 +1009,7 @@ function AdminPortal({
             setTeacherName("");
             localStorage.removeItem(ADMIN_SESSION_KEY);
             setIsUnlocked(false);
+            showToast("Teacher logged out.");
             setAdminSection("performance");
           }}
         />
@@ -1222,14 +1251,17 @@ function UploadStudentsCard({ onStudentsChange, students }) {
 
     const existingBySerial = new Map(students.map((entry) => [normalize(entry.serial), entry]));
     const uploadedStudents = body
-      .map((row, index) => {
+      .map((row) => {
         const givenSerial = serialIndex >= 0 ? row[serialIndex] : "";
-        const serial = givenSerial || generateSerial([...existingBySerial.values()], index);
-        return { name: row[nameIndex], serial };
+        const serial = givenSerial || generateSerial([...existingBySerial.values()]);
+        const student = { name: row[nameIndex], serial };
+        if (student.name && student.serial) {
+          existingBySerial.set(normalize(student.serial), student);
+        }
+        return student;
       })
       .filter((entry) => entry.name && entry.serial);
 
-    uploadedStudents.forEach((entry) => existingBySerial.set(normalize(entry.serial), entry));
     await onStudentsChange(Array.from(existingBySerial.values()));
     setLatestUpload(uploadedStudents);
     setMessage(`${uploadedStudents.length} students imported. Serial numbers have been generated.`);
@@ -1314,9 +1346,14 @@ function UploadStudentsCard({ onStudentsChange, students }) {
 
 function PerformancePanel({ attempts, onAttemptsClear, onSettingsChange, settings, students, subjects }) {
   const results = Object.values(attempts);
+  const [draftDuration, setDraftDuration] = useState(settings.durationMinutes);
   const average = results.length
     ? Math.round(results.reduce((total, attempt) => total + (attempt.score / attempt.total) * 100, 0) / results.length)
     : 0;
+
+  useEffect(() => {
+    setDraftDuration(settings.durationMinutes);
+  }, [settings.durationMinutes]);
 
   function exportPerformance() {
     downloadCsv("student-performance.csv", [
@@ -1369,20 +1406,25 @@ function PerformancePanel({ attempts, onAttemptsClear, onSettingsChange, setting
             <p className="text-sm font-bold uppercase tracking-wide text-slate-500">Quiz Time</p>
             <p className="mt-1 text-sm text-slate-600">Set the duration students get for each quiz.</p>
           </div>
-          <label className="flex items-center gap-2">
-            <input
-              min="1"
-              max="180"
-              type="number"
-              value={settings.durationMinutes}
-              onChange={(event) => {
-                const durationMinutes = Math.max(1, Number(event.target.value) || 1);
-                onSettingsChange({ ...settings, durationMinutes });
-              }}
-              className="h-11 w-24 rounded-lg border border-slate-300 px-3 text-center font-black outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100"
-            />
-            <span className="text-sm font-bold text-slate-700">minutes</span>
-          </label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="flex items-center gap-2">
+              <input
+                min="1"
+                max="180"
+                type="number"
+                value={draftDuration}
+                onChange={(event) => setDraftDuration(Math.max(1, Number(event.target.value) || 1))}
+                className="h-11 w-24 rounded-lg border border-slate-300 px-3 text-center font-black outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100"
+              />
+              <span className="text-sm font-bold text-slate-700">minutes</span>
+            </label>
+            <button
+              onClick={() => onSettingsChange({ ...settings, durationMinutes: draftDuration })}
+              className="inline-flex h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 font-bold text-white hover:bg-indigo-700"
+            >
+              Save time
+            </button>
+          </div>
         </div>
       </div>
 
