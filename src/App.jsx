@@ -1191,9 +1191,31 @@ function SubjectManager({ onSubjectsChange, subjects }) {
 }
 
 function UploadQuestionsCard({ onSubjectsChange, subjects }) {
+  const [step, setStep] = useState("idle");
   const [subjectTitle, setSubjectTitle] = useState("");
   const [message, setMessage] = useState("");
   const [stagedSubject, setStagedSubject] = useState(null);
+
+  function resetFlow(nextMessage = "") {
+    setStep("idle");
+    setSubjectTitle("");
+    setStagedSubject(null);
+    setMessage(nextMessage);
+  }
+
+  function continueToUpload(event) {
+    event.preventDefault();
+    const cleanSubjectTitle = subjectTitle.trim();
+
+    if (!cleanSubjectTitle) {
+      setMessage("Enter the subject name first.");
+      return;
+    }
+
+    setSubjectTitle(cleanSubjectTitle);
+    setStep("upload");
+    setMessage("");
+  }
 
   async function handleFile(event) {
     const file = event.target.files?.[0];
@@ -1245,6 +1267,7 @@ function UploadQuestionsCard({ onSubjectsChange, subjects }) {
       title: cleanSubjectTitle,
       questions
     });
+    setStep("preview");
     setMessage(`${questions.length} ${cleanSubjectTitle} questions ready. Click Done to save.`);
     event.target.value = "";
   }
@@ -1258,9 +1281,7 @@ function UploadQuestionsCard({ onSubjectsChange, subjects }) {
     const existingById = new Map(subjects.map((subject) => [subject.id, subject]));
     existingById.set(stagedSubject.id, stagedSubject);
     await onSubjectsChange(Array.from(existingById.values()));
-    setSubjectTitle("");
-    setStagedSubject(null);
-    setMessage(`${stagedSubject.title} saved successfully.`);
+    resetFlow(`${stagedSubject.title} saved successfully.`);
   }
 
   async function removeSubject(subjectId) {
@@ -1271,35 +1292,111 @@ function UploadQuestionsCard({ onSubjectsChange, subjects }) {
   return (
     <div className="space-y-6">
       <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-        <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500">
-          <FileUp size={17} />
-          Add Subject Questions
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500">
+            <FileUp size={17} />
+            Add Subject Questions
+          </div>
+          {step !== "idle" && (
+            <button
+              onClick={() => resetFlow()}
+              className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+          )}
         </div>
-        <div className="grid gap-3">
-          <input
-            value={subjectTitle}
-            onChange={(event) => setSubjectTitle(event.target.value)}
-            className="h-11 rounded-lg border border-slate-300 px-3 outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100"
-            placeholder="Type subject name, e.g. Mathematics"
-          />
-          <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:bg-indigo-50">
-            <FileUp size={24} className="mb-2 text-indigo-600" />
-            <span className="font-bold">Upload this subject's CSV</span>
-            <span className="mt-1 text-sm text-slate-600">question, optionA, optionB, optionC, optionD, answer</span>
-            <input className="hidden" type="file" accept=".csv" onChange={handleFile} />
-          </label>
-          <button
-            onClick={saveStagedSubject}
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-emerald-600 px-4 font-bold text-white hover:bg-emerald-700"
-          >
-            Done
-          </button>
-        </div>
+
+        {step === "idle" && (
+          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+            <button
+              onClick={() => {
+                setStep("name");
+                setMessage("");
+              }}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 font-bold text-white hover:bg-indigo-700"
+            >
+              <BookOpen size={18} />
+              Add subject
+            </button>
+            <p className="mt-3 text-sm font-semibold text-slate-600">
+              Start here to create a subject and upload its question CSV.
+            </p>
+          </div>
+        )}
+
+        {step === "name" && (
+          <form onSubmit={continueToUpload} className="grid gap-3">
+            <label className="block">
+              <span className="mb-2 block text-sm font-bold text-slate-700">Subject name</span>
+              <input
+                value={subjectTitle}
+                onChange={(event) => setSubjectTitle(event.target.value)}
+                className="h-11 w-full rounded-lg border border-slate-300 px-3 outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100"
+                placeholder="Example: Mathematics"
+              />
+            </label>
+            <button className="inline-flex h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 font-bold text-white hover:bg-indigo-700">
+              Continue
+            </button>
+          </form>
+        )}
+
+        {step === "upload" && (
+          <div className="grid gap-3">
+            <div className="rounded-lg bg-indigo-50 p-3">
+              <p className="text-sm font-bold uppercase tracking-wide text-indigo-700">Subject</p>
+              <p className="mt-1 font-black text-slate-950">{subjectTitle}</p>
+            </div>
+            <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:bg-indigo-50">
+              <FileUp size={24} className="mb-2 text-indigo-600" />
+              <span className="font-bold">Upload {subjectTitle} CSV</span>
+              <span className="mt-1 text-sm text-slate-600">question, optionA, optionB, optionC, optionD, answer</span>
+              <input className="hidden" type="file" accept=".csv" onChange={handleFile} />
+            </label>
+          </div>
+        )}
+
+        {step === "preview" && stagedSubject && (
+          <div className="grid gap-3">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="mt-0.5 text-emerald-700" size={20} />
+                <div>
+                  <p className="font-black text-slate-950">{stagedSubject.title}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">
+                    {stagedSubject.questions.length} questions validated and ready to save.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="max-h-56 overflow-auto rounded-lg border border-slate-200">
+              {stagedSubject.questions.slice(0, 5).map((item, index) => (
+                <div key={`${item.question}-${index}`} className="border-b border-slate-100 p-3 last:border-b-0">
+                  <p className="text-sm font-bold text-slate-900">{index + 1}. {item.question}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Answer: {item.answer}</p>
+                </div>
+              ))}
+              {stagedSubject.questions.length > 5 && (
+                <div className="p-3 text-sm font-semibold text-slate-500">
+                  + {stagedSubject.questions.length - 5} more questions
+                </div>
+              )}
+            </div>
+            <button
+              onClick={saveStagedSubject}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 font-bold text-white hover:bg-emerald-700"
+            >
+              <CheckCircle2 size={18} />
+              Done
+            </button>
+          </div>
+        )}
+
         <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
-          <p className="font-bold text-slate-800">New flow:</p>
-          <p>1. Type the subject name.</p>
-          <p>2. Upload that subject's CSV file.</p>
-          <p>3. Click Done to store it in Firebase.</p>
+          <p className="font-bold text-slate-800">CSV format:</p>
+          <p>question, optionA, optionB, optionC, optionD, answer</p>
+          <p>The answer can be A/B/C/D or the exact option text.</p>
         </div>
         {message && <p className="mt-3 text-sm font-semibold text-slate-600">{message}</p>}
       </div>
