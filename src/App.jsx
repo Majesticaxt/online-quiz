@@ -587,7 +587,7 @@ function StudentPortal(props) {
   return (
     <section className="mx-auto grid max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[360px_1fr] lg:px-6">
       <aside className="space-y-4">
-        <LoginCard {...props} />
+        {!student && <LoginCard {...props} />}
         {student && !isTakingQuiz && (
           <SubjectSelector
             attempts={attempts}
@@ -617,7 +617,31 @@ function StudentPortal(props) {
           <ResultPanel result={submitted || previousAttempt} />
         )}
       </section>
+      {student && <FloatingLogoutCard name={student.name} label={student.serial} onLogout={props.onResetSession} />}
     </section>
+  );
+}
+
+function FloatingLogoutCard({ label, name, onLogout }) {
+  return (
+    <div className="animate-card-in fixed right-3 top-3 z-50 w-[210px] rounded-lg border border-slate-200 bg-white p-2 shadow-soft sm:right-4 sm:top-4">
+      <div className="flex items-center gap-2">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+          <UserRound size={16} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-black">{name}</p>
+          <p className="truncate text-xs font-semibold text-slate-500">{label}</p>
+        </div>
+      </div>
+      <button
+        onClick={onLogout}
+        className="mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+      >
+        <LogOut size={15} />
+        Log out
+      </button>
+    </div>
   );
 }
 
@@ -1001,18 +1025,6 @@ function AdminPortal({
   return (
     <section className="mx-auto grid max-w-6xl gap-4 px-3 py-4 sm:gap-6 sm:px-4 sm:py-6 lg:grid-cols-[280px_minmax(0,1fr)] lg:px-6">
       <aside className="space-y-3 sm:space-y-4">
-        <TeacherSessionCard
-          teacherName={teacherName}
-          onLogout={() => {
-            setAdminName("");
-            setAdminCode("");
-            setTeacherName("");
-            localStorage.removeItem(ADMIN_SESSION_KEY);
-            setIsUnlocked(false);
-            showToast("Teacher logged out.");
-            setAdminSection("performance");
-          }}
-        />
         <AdminNav active={adminSection} onChange={setAdminSection} />
       </aside>
       <div className="min-w-0 space-y-6">
@@ -1027,7 +1039,6 @@ function AdminPortal({
           />
         )}
         {adminSection === "students" && <UploadStudentsCard onStudentsChange={onStudentsChange} students={students} />}
-        {adminSection === "subjects" && <SubjectManager subjects={subjects} onSubjectsChange={onSubjectsChange} />}
         {adminSection === "questions" && (
           <>
             <UploadQuestionsCard onSubjectsChange={onSubjectsChange} subjects={subjects} />
@@ -1035,6 +1046,19 @@ function AdminPortal({
           </>
         )}
       </div>
+      <FloatingLogoutCard
+        name={teacherName}
+        label="Teacher admin"
+        onLogout={() => {
+          setAdminName("");
+          setAdminCode("");
+          setTeacherName("");
+          localStorage.removeItem(ADMIN_SESSION_KEY);
+          setIsUnlocked(false);
+          showToast("Teacher logged out.");
+          setAdminSection("performance");
+        }}
+      />
     </section>
   );
 }
@@ -1043,7 +1067,6 @@ function AdminNav({ active, onChange }) {
   const items = [
     ["performance", BarChart3, "Performance"],
     ["students", UserPlus, "Students"],
-    ["subjects", BookOpen, "Subjects"],
     ["questions", FileUp, "Questions"]
   ];
 
@@ -1163,11 +1186,20 @@ function SubjectManager({ onSubjectsChange, subjects }) {
 }
 
 function UploadQuestionsCard({ onSubjectsChange, subjects }) {
+  const [subjectTitle, setSubjectTitle] = useState("");
   const [message, setMessage] = useState("");
+  const [stagedSubject, setStagedSubject] = useState(null);
 
   async function handleFile(event) {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    const cleanSubjectTitle = subjectTitle.trim();
+    if (!cleanSubjectTitle) {
+      setMessage("Type the subject name before uploading the CSV file.");
+      event.target.value = "";
+      return;
+    }
 
     const text = await file.text();
     const rows = parseCsv(text);
@@ -1181,51 +1213,122 @@ function UploadQuestionsCard({ onSubjectsChange, subjects }) {
     const optionDIndex = headers.indexOf("optiond");
     const answerIndex = headers.indexOf("answer");
 
-    if ([subjectIndex, questionIndex, optionAIndex, optionBIndex, optionCIndex, optionDIndex, answerIndex].includes(-1)) {
-      setMessage("CSV needs: subject, question, optionA, optionB, optionC, optionD, answer.");
+    if ([questionIndex, optionAIndex, optionBIndex, optionCIndex, optionDIndex, answerIndex].includes(-1)) {
+      setMessage("CSV needs: question, optionA, optionB, optionC, optionD, answer. The subject column is optional now.");
       return;
     }
 
-    const grouped = new Map();
+    const questions = [];
     body.forEach((row) => {
-      const subjectTitle = row[subjectIndex];
       const options = [row[optionAIndex], row[optionBIndex], row[optionCIndex], row[optionDIndex]].filter(Boolean);
       const question = row[questionIndex];
       const answer = resolveAnswer(row[answerIndex] || "", options);
 
-      if (!subjectTitle || !question || !answer || options.length < 2) return;
+      if (!question || !answer || options.length < 2) return;
 
-      const id = slugify(subjectTitle);
-      if (!grouped.has(id)) grouped.set(id, { id, title: subjectTitle, questions: [] });
-      grouped.get(id).questions.push({ question, options, answer });
+      questions.push({ question, options, answer });
     });
 
-    const uploadedSubjects = Array.from(grouped.values());
-    const existingById = new Map(subjects.map((subject) => [subject.id, subject]));
-    uploadedSubjects.forEach((subject) => existingById.set(subject.id, subject));
-    await onSubjectsChange(Array.from(existingById.values()));
-    setMessage(`${uploadedSubjects.length} subject question bank uploaded.`);
+    if (!questions.length) {
+      setMessage("No valid questions were found in that CSV file.");
+      event.target.value = "";
+      return;
+    }
+
+    setStagedSubject({
+      id: slugify(cleanSubjectTitle),
+      title: cleanSubjectTitle,
+      questions
+    });
+    setMessage(`${questions.length} ${cleanSubjectTitle} questions ready. Click Done to save.`);
     event.target.value = "";
   }
 
+  async function saveStagedSubject() {
+    if (!stagedSubject) {
+      setMessage("Upload a question CSV before clicking Done.");
+      return;
+    }
+
+    const existingById = new Map(subjects.map((subject) => [subject.id, subject]));
+    existingById.set(stagedSubject.id, stagedSubject);
+    await onSubjectsChange(Array.from(existingById.values()));
+    setSubjectTitle("");
+    setStagedSubject(null);
+    setMessage(`${stagedSubject.title} saved successfully.`);
+  }
+
+  async function removeSubject(subjectId) {
+    await onSubjectsChange(subjects.filter((subject) => subject.id !== subjectId));
+    setMessage("Subject removed.");
+  }
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-      <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500">
-        <FileUp size={17} />
-        Upload Questions
+    <div className="space-y-6">
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+        <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500">
+          <FileUp size={17} />
+          Add Subject Questions
+        </div>
+        <div className="grid gap-3">
+          <input
+            value={subjectTitle}
+            onChange={(event) => setSubjectTitle(event.target.value)}
+            className="h-11 rounded-lg border border-slate-300 px-3 outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100"
+            placeholder="Type subject name, e.g. Mathematics"
+          />
+          <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:bg-indigo-50">
+            <FileUp size={24} className="mb-2 text-indigo-600" />
+            <span className="font-bold">Upload this subject's CSV</span>
+            <span className="mt-1 text-sm text-slate-600">question, optionA, optionB, optionC, optionD, answer</span>
+            <input className="hidden" type="file" accept=".csv" onChange={handleFile} />
+          </label>
+          <button
+            onClick={saveStagedSubject}
+            className="inline-flex h-11 items-center justify-center rounded-lg bg-emerald-600 px-4 font-bold text-white hover:bg-emerald-700"
+          >
+            Done
+          </button>
+        </div>
+        <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+          <p className="font-bold text-slate-800">New flow:</p>
+          <p>1. Type the subject name.</p>
+          <p>2. Upload that subject's CSV file.</p>
+          <p>3. Click Done to store it in Firebase.</p>
+        </div>
+        {message && <p className="mt-3 text-sm font-semibold text-slate-600">{message}</p>}
       </div>
-      <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:bg-indigo-50">
-        <FileUp size={24} className="mb-2 text-indigo-600" />
-        <span className="font-bold">Upload CSV</span>
-        <span className="mt-1 text-sm text-slate-600">subject, question, optionA, optionB, optionC, optionD, answer</span>
-        <input className="hidden" type="file" accept=".csv" onChange={handleFile} />
-      </label>
-      <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-600">
-        <p className="font-bold text-slate-800">Format example:</p>
-        <p>subject = Mathematics or English Language</p>
-        <p>answer can be the exact option text, or A/B/C/D.</p>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+        <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500">
+          <BookOpen size={17} />
+          Stored Subjects
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {subjects.map((subject) => (
+            <div key={subject.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-black">{subject.title}</p>
+                  <p className="mt-1 text-sm text-slate-600">{subject.questions.length} questions</p>
+                </div>
+                <button
+                  onClick={() => removeSubject(subject.id)}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-3 text-sm font-bold text-rose-700 hover:bg-rose-50"
+                >
+                  <Trash2 size={16} />
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+          {!subjects.length && (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm font-semibold text-slate-500">
+              No subjects uploaded yet.
+            </div>
+          )}
+        </div>
       </div>
-      {message && <p className="mt-3 text-sm font-semibold text-slate-600">{message}</p>}
     </div>
   );
 }
@@ -1315,10 +1418,10 @@ function UploadStudentsCard({ onStudentsChange, students }) {
             {students.length}
           </span>
         </div>
-        <div className="grid gap-3">
+        <div className="overflow-hidden rounded-lg border border-slate-200">
           {students.map((student) => (
-            <div key={student.serial} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div key={student.serial} className="border-b border-slate-200 bg-slate-50 p-3 last:border-b-0">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="truncate font-black">{student.name}</p>
                   <p className="mt-1 text-sm font-semibold text-slate-600">{student.serial}</p>
@@ -1334,7 +1437,7 @@ function UploadStudentsCard({ onStudentsChange, students }) {
             </div>
           ))}
           {!students.length && (
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm font-semibold text-slate-500">
+            <div className="bg-slate-50 p-6 text-center text-sm font-semibold text-slate-500">
               No students uploaded yet.
             </div>
           )}
@@ -1347,6 +1450,19 @@ function UploadStudentsCard({ onStudentsChange, students }) {
 function PerformancePanel({ attempts, onAttemptsClear, onSettingsChange, settings, students, subjects }) {
   const results = Object.values(attempts);
   const [draftDuration, setDraftDuration] = useState(settings.durationMinutes);
+  const groupedResults = results.reduce((groups, attempt) => {
+    const key = attempt.serial;
+    if (!groups[key]) {
+      groups[key] = {
+        studentName: attempt.studentName,
+        serial: attempt.serial,
+        subjects: []
+      };
+    }
+    groups[key].subjects.push(attempt);
+    return groups;
+  }, {});
+  const studentResults = Object.values(groupedResults);
   const average = results.length
     ? Math.round(results.reduce((total, attempt) => total + (attempt.score / attempt.total) * 100, 0) / results.length)
     : 0;
@@ -1428,25 +1544,34 @@ function PerformancePanel({ attempts, onAttemptsClear, onSettingsChange, setting
         </div>
       </div>
 
-      <div className="grid gap-3 md:hidden">
-        {results.map((attempt) => (
-          <div key={`${attempt.serial}-${attempt.subjectId}`} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <div className="grid gap-3">
+        {studentResults.map((studentResult) => (
+          <div key={studentResult.serial} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate font-black">{attempt.studentName}</p>
-                <p className="mt-1 text-sm font-semibold text-slate-600">{attempt.serial}</p>
+                <p className="truncate font-black">{studentResult.studentName}</p>
+                <p className="mt-1 text-sm font-semibold text-slate-600">{studentResult.serial}</p>
               </div>
-              <span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-black text-emerald-700">
-                {Math.round((attempt.score / attempt.total) * 100)}%
+              <span className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-black text-indigo-700">
+                {studentResult.subjects.length} quiz
               </span>
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <ResultMini label="Subject" value={attempt.subject} />
-              <ResultMini label="Score" value={`${attempt.score}/${attempt.total}`} />
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {studentResult.subjects.map((attempt) => (
+                <div key={`${attempt.serial}-${attempt.subjectId}`} className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <ResultMini label="Subject" value={attempt.subject} />
+                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-black text-emerald-700">
+                      {Math.round((attempt.score / attempt.total) * 100)}%
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <ResultMini label="Score" value={`${attempt.score}/${attempt.total}`} />
+                    <ResultMini label="Submitted" value={new Date(attempt.submittedAt).toLocaleDateString()} />
+                  </div>
+                </div>
+              ))}
             </div>
-            <p className="mt-3 text-xs font-semibold text-slate-500">
-              {new Date(attempt.submittedAt).toLocaleString()}
-            </p>
           </div>
         ))}
         {!results.length && (
@@ -1456,39 +1581,6 @@ function PerformancePanel({ attempts, onAttemptsClear, onSettingsChange, setting
         )}
       </div>
 
-      <div className="hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[720px] border-collapse text-left text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 text-slate-500">
-              <th className="py-3 pr-3 font-bold">Student</th>
-              <th className="py-3 pr-3 font-bold">Serial</th>
-              <th className="py-3 pr-3 font-bold">Subject</th>
-              <th className="py-3 pr-3 font-bold">Score</th>
-              <th className="py-3 pr-3 font-bold">Percent</th>
-              <th className="py-3 pr-3 font-bold">Submitted</th>
-            </tr>
-          </thead>
-          <tbody>
-            {results.map((attempt) => (
-              <tr key={`${attempt.serial}-${attempt.subjectId}`} className="border-b border-slate-100">
-                <td className="py-3 pr-3 font-bold">{attempt.studentName}</td>
-                <td className="py-3 pr-3">{attempt.serial}</td>
-                <td className="py-3 pr-3">{attempt.subject}</td>
-                <td className="py-3 pr-3">{attempt.score}/{attempt.total}</td>
-                <td className="py-3 pr-3">{Math.round((attempt.score / attempt.total) * 100)}%</td>
-                <td className="py-3 pr-3">{new Date(attempt.submittedAt).toLocaleString()}</td>
-              </tr>
-            ))}
-            {!results.length && (
-              <tr>
-                <td className="py-8 text-center font-semibold text-slate-500" colSpan="6">
-                  No student submissions yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }
