@@ -810,6 +810,18 @@ function StartPanel({ selectedSubject, previousAttempt, onStart }) {
           <p className="mt-3 leading-7 text-slate-600">
             The timer begins immediately. Each screen shows one question with randomized answer choices.
           </p>
+          <details className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <summary className="cursor-pointer text-sm font-black text-slate-800">
+              Quiz instructions
+            </summary>
+            <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+              <p>This is a Computer-Based Test. Read each question carefully before answering.</p>
+              <p>Each question carries 1 mark. Select only one option: A, B, C, or D.</p>
+              <p>Rough paper and calculator are allowed where needed. External devices are not allowed.</p>
+              <p>Ensure your device is charged and your internet connection is stable before starting.</p>
+              <p>Click Submit only when you are sure of your answers. Submitted quizzes cannot be reopened.</p>
+            </div>
+          </details>
           <button
             onClick={onStart}
             className="mt-7 inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-6 font-bold text-white transition hover:bg-indigo-700"
