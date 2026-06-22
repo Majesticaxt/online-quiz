@@ -805,7 +805,7 @@ function StartPanel({ selectedSubject, previousAttempt, onStart }) {
             Ready for {selectedSubject?.title}
           </p>
           <h2 className="text-3xl font-black tracking-normal text-slate-950">
-            Start only when the student is ready.
+            Start only when you are ready.
           </h2>
           <p className="mt-3 leading-7 text-slate-600">
             The timer begins immediately. Each screen shows one question with randomized answer choices.
