@@ -1041,7 +1041,7 @@ function AdminPortal({
         {adminSection === "questions" && (
           <>
             <UploadQuestionsCard onSubjectsChange={onSubjectsChange} subjects={subjects} />
-            <QuestionBank subjects={subjects} />
+            <QuestionBank onSubjectsChange={onSubjectsChange} subjects={subjects} />
           </>
         )}
       </div>
@@ -1706,21 +1706,168 @@ function Metric({ label, value }) {
   );
 }
 
-function QuestionBank({ subjects }) {
+function QuestionBank({ onSubjectsChange, subjects }) {
+  const [editingSubjectId, setEditingSubjectId] = useState("");
+  const [draftQuestions, setDraftQuestions] = useState([]);
+  const [message, setMessage] = useState("");
+
+  const editingSubject = subjects.find((subject) => subject.id === editingSubjectId);
+
+  function startEdit(subject) {
+    setEditingSubjectId(subject.id);
+    setDraftQuestions(subject.questions.map((question) => ({ ...question, options: [...question.options] })));
+    setMessage("");
+  }
+
+  function updateQuestion(questionIndex, field, value) {
+    setDraftQuestions((current) =>
+      current.map((question, index) => (index === questionIndex ? { ...question, [field]: value } : question))
+    );
+  }
+
+  function updateOption(questionIndex, optionIndex, value) {
+    setDraftQuestions((current) =>
+      current.map((question, index) => {
+        if (index !== questionIndex) return question;
+        const options = question.options.map((option, currentOptionIndex) =>
+          currentOptionIndex === optionIndex ? value : option
+        );
+        return { ...question, options };
+      })
+    );
+  }
+
+  function removeQuestion(questionIndex) {
+    setDraftQuestions((current) => current.filter((_, index) => index !== questionIndex));
+  }
+
+  async function saveChanges() {
+    if (!editingSubject) return;
+
+    const cleanedQuestions = draftQuestions
+      .map((question) => ({
+        question: question.question.trim(),
+        options: question.options.map((option) => option.trim()),
+        answer: resolveAnswer(question.answer.trim(), question.options)
+      }))
+      .filter((question) => question.question && question.answer && question.options.every(Boolean));
+
+    if (!cleanedQuestions.length) {
+      setMessage("At least one valid question is required.");
+      return;
+    }
+
+    const nextSubjects = subjects.map((subject) =>
+      subject.id === editingSubject.id ? { ...subject, questions: cleanedQuestions } : subject
+    );
+
+    await onSubjectsChange(nextSubjects);
+    setEditingSubjectId("");
+    setDraftQuestions([]);
+    setMessage(`${editingSubject.title} questions updated.`);
+  }
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
       <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500">
         <BookOpen size={17} />
         Question Bank
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {subjects.map((subject) => (
-          <div key={subject.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <p className="font-black">{subject.title}</p>
-            <p className="mt-1 text-sm text-slate-600">{subject.questions.length} uploaded questions</p>
+      {!editingSubject && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {subjects.map((subject) => (
+            <div key={subject.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <p className="font-black">{subject.title}</p>
+              <p className="mt-1 text-sm text-slate-600">{subject.questions.length} uploaded questions</p>
+              <button
+                onClick={() => startEdit(subject)}
+                className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-lg bg-indigo-600 px-3 text-sm font-bold text-white hover:bg-indigo-700"
+              >
+                Edit questions
+              </button>
+            </div>
+          ))}
+          {!subjects.length && (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm font-semibold text-slate-500">
+              No uploaded questions yet.
+            </div>
+          )}
+        </div>
+      )}
+
+      {editingSubject && (
+        <div className="space-y-4">
+          <div className="rounded-lg bg-indigo-50 p-4">
+            <p className="text-sm font-bold uppercase tracking-wide text-indigo-700">Editing</p>
+            <p className="mt-1 font-black text-slate-950">{editingSubject.title}</p>
           </div>
-        ))}
-      </div>
+          <div className="grid gap-4">
+            {draftQuestions.map((question, questionIndex) => (
+              <div key={`${question.question}-${questionIndex}`} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="font-black">Question {questionIndex + 1}</p>
+                  <button
+                    onClick={() => removeQuestion(questionIndex)}
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-3 text-sm font-bold text-rose-700 hover:bg-rose-50"
+                  >
+                    <Trash2 size={15} />
+                    Remove
+                  </button>
+                </div>
+                <textarea
+                  value={question.question}
+                  onChange={(event) => updateQuestion(questionIndex, "question", event.target.value)}
+                  className="min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100"
+                />
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {question.options.map((option, optionIndex) => (
+                    <label key={optionIndex} className="block">
+                      <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Option {String.fromCharCode(65 + optionIndex)}
+                      </span>
+                      <input
+                        value={option}
+                        onChange={(event) => updateOption(questionIndex, optionIndex, event.target.value)}
+                        className="h-10 w-full rounded-lg border border-slate-300 px-3 outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">
+                    Correct answer
+                  </span>
+                  <input
+                    value={question.answer}
+                    onChange={(event) => updateQuestion(questionIndex, "answer", event.target.value)}
+                    className="h-10 w-full rounded-lg border border-slate-300 px-3 outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100"
+                    placeholder="A, B, C, D, or exact answer"
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+          {message && <p className="text-sm font-semibold text-slate-600">{message}</p>}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              onClick={() => {
+                setEditingSubjectId("");
+                setDraftQuestions([]);
+                setMessage("");
+              }}
+              className="h-11 rounded-lg border border-slate-300 bg-white font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveChanges}
+              className="h-11 rounded-lg bg-emerald-600 font-bold text-white hover:bg-emerald-700"
+            >
+              Save changes
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
