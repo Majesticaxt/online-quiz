@@ -123,6 +123,17 @@ export async function saveAttempt(attempt, key, currentAttempts) {
   await setDoc(doc(db, "attempts", attemptId), attempt);
 }
 
+export async function deleteStoredAttempt(attemptId, key, currentAttempts) {
+  if (!firebaseEnabled) {
+    const nextAttempts = { ...currentAttempts };
+    delete nextAttempts[attemptId];
+    writeStorage(key, nextAttempts);
+    return;
+  }
+
+  await deleteDoc(doc(db, "attempts", attemptId));
+}
+
 export async function clearStoredAttempts(key) {
   if (!firebaseEnabled) {
     writeStorage(key, {});

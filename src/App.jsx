@@ -13,6 +13,7 @@ import {
   LockKeyhole,
   LogOut,
   LogIn,
+  RotateCcw,
   ShieldCheck,
   Trash2,
   UserPlus,
@@ -21,6 +22,7 @@ import {
 import { quizSettings } from "./quizData";
 import {
   clearStoredAttempts,
+  deleteStoredAttempt,
   loadQuizData,
   saveAttempt,
   saveSettings,
@@ -164,7 +166,6 @@ export default function App() {
   const [submitted, setSubmitted] = useState(null);
   const [loginError, setLoginError] = useState("");
   const [isLoadingData, setIsLoadingData] = useState(true);
-  const [securityWarnings, setSecurityWarnings] = useState(0);
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
   const [storageError, setStorageError] = useState("");
   const [toast, setToast] = useState("");
@@ -239,33 +240,6 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [isTakingQuiz, answers, questions]);
 
-  useEffect(() => {
-    if (!isTakingQuiz) return undefined;
-
-    function handleVisibilityChange() {
-      if (!document.hidden) return;
-
-      setSecurityWarnings((current) => {
-        const next = current + 1;
-        if (next >= 2) submitQuiz(true);
-        return next;
-      });
-    }
-
-    function handleBeforeUnload(event) {
-      event.preventDefault();
-      event.returnValue = "";
-    }
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [isTakingQuiz, answers, questions]);
-
   function handleLogin(event) {
     event.preventDefault();
     const name = normalize(loginName);
@@ -318,7 +292,6 @@ export default function App() {
     setAnswers({});
     setCurrentQuestion(0);
     setSecondsLeft(durationSeconds);
-    setSecurityWarnings(0);
     setSubmitted(null);
   }
 
@@ -369,7 +342,6 @@ export default function App() {
     setLoginSerial("");
     setLoginError("");
     setCurrentQuestion(0);
-    setSecurityWarnings(0);
     setSecondsLeft(durationSeconds);
   }
 
@@ -387,6 +359,20 @@ export default function App() {
     } catch (error) {
       console.error(error);
       setStorageError("Could not clear Firebase attempts. Check Firestore rules.");
+    }
+  }
+
+  async function resetAttempt(attemptId) {
+    const nextAttempts = { ...attempts };
+    delete nextAttempts[attemptId];
+    setAttempts(nextAttempts);
+    try {
+      await deleteStoredAttempt(attemptId, ATTEMPTS_KEY, attempts);
+      setStorageError("");
+      showToast("Reattempt enabled. The old attempt has been removed.");
+    } catch (error) {
+      console.error(error);
+      setStorageError("Could not remove that attempt from Firebase. Check Firestore rules.");
     }
   }
 
@@ -441,7 +427,6 @@ export default function App() {
           previousAttempt={previousAttempt}
           questions={questions}
           secondsLeft={secondsLeft}
-          securityWarnings={securityWarnings}
           selectedSubject={selectedSubject}
           selectedSubjectId={selectedSubjectId}
           student={student}
@@ -455,6 +440,7 @@ export default function App() {
         <AdminPortal
           attempts={attempts}
           onAttemptsClear={clearAttempts}
+          onAttemptReset={resetAttempt}
           onLoginStateChange={setIsAdminLoggedIn}
           onSettingsChange={updateSettings}
           onStudentsChange={updateStudents}
@@ -842,8 +828,7 @@ function QuizPanel({
   onSelectAnswer,
   onSubmit,
   questions,
-  secondsLeft,
-  securityWarnings
+  secondsLeft
 }) {
   const answeredCount = Object.keys(answers).length;
   const timeIsLow = secondsLeft <= 60;
@@ -868,11 +853,6 @@ function QuizPanel({
             {formatTime(secondsLeft)}
           </div>
         </div>
-        {securityWarnings > 0 && (
-          <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
-            Warning {securityWarnings}/2: leaving the quiz tab may auto-submit the exam.
-          </div>
-        )}
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
           <div
             className="h-full rounded-full bg-indigo-600"
@@ -967,6 +947,7 @@ function ResultPanel({ result }) {
 function AdminPortal({
   attempts,
   onAttemptsClear,
+  onAttemptReset,
   onLoginStateChange,
   onSettingsChange,
   onStudentsChange,
@@ -1049,6 +1030,7 @@ function AdminPortal({
           <PerformancePanel
             attempts={attempts}
             onAttemptsClear={onAttemptsClear}
+            onAttemptReset={onAttemptReset}
             onSettingsChange={onSettingsChange}
             settings={settings}
             students={students}
@@ -1561,7 +1543,7 @@ function UploadStudentsCard({ onStudentsChange, students }) {
   );
 }
 
-function PerformancePanel({ attempts, onAttemptsClear, onSettingsChange, settings, students, subjects }) {
+function PerformancePanel({ attempts, onAttemptsClear, onAttemptReset, onSettingsChange, settings, students, subjects }) {
   const results = Object.values(attempts);
   const [draftDuration, setDraftDuration] = useState(settings.durationMinutes);
   const groupedResults = results.reduce((groups, attempt) => {
@@ -1683,6 +1665,13 @@ function PerformancePanel({ attempts, onAttemptsClear, onSettingsChange, setting
                     <ResultMini label="Score" value={`${attempt.score}/${attempt.total}`} />
                     <ResultMini label="Submitted" value={new Date(attempt.submittedAt).toLocaleDateString()} />
                   </div>
+                  <button
+                    onClick={() => onAttemptReset(`${attempt.serial}:${attempt.subjectId}`)}
+                    className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800 hover:bg-amber-100"
+                  >
+                    <RotateCcw size={16} />
+                    Allow reattempt
+                  </button>
                 </div>
               ))}
             </div>
